@@ -77,11 +77,16 @@ module Elasticsearch
         #    Article.import transform: transform
         #
         def import(options={}, &block)
-          errors       = 0
-          refresh      = options.delete(:refresh)   || false
-          target_index = options.delete(:index)     || index_name
-          target_type  = options.delete(:type)      || document_type
-          transform    = options.delete(:transform) || __transform
+          errors         = 0
+          refresh        = options.delete(:refresh)   || false
+
+          transform_opts = { index: options[:index],
+                             type: options[:type] }
+          transform      = options.delete(:transform) || __transform
+
+          target_index   = options.delete(:index)     || index_name
+          target_type    = options.delete(:type)      || document_type
+
 
           unless transform.respond_to?(:call)
             raise ArgumentError,
@@ -93,10 +98,7 @@ module Elasticsearch
           end
 
           __find_in_batches(options) do |batch|
-            response = client.bulk \
-                         index:   target_index,
-                         type:    target_type,
-                         body:    __batch_to_bulk(batch, transform)
+            response = client.bulk body: __batch_to_bulk(batch, transform, transform_opts)
 
             yield response if block_given?
 
@@ -108,8 +110,13 @@ module Elasticsearch
           return errors
         end
 
-        def __batch_to_bulk(batch, transform)
-          batch.map { |model| transform.call(model) }
+        def __batch_to_bulk(batch, transform, opts = {})
+          batch.map do |model|
+            row = transform.call(model)
+            row[:index][:_index] = opts[:index] || model.__elasticsearch__.index_name
+            row[:index][:_type]  = opts[:type]  || model.__elasticsearch__.document_type
+            row
+          end
         end
       end
 
